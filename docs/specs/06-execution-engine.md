@@ -51,6 +51,18 @@ to Block 9. Flattening positions after such a halt is triggered by Block 5/7 via
 ### 2.1 Identifiers
 
 - **`intent_id: str`** — from `OrderRequest`, groups all child orders of one request.
+- **`request_id: str`** — from `OrderRequest` (Block 5's uuid4 idempotency key, unique
+  per emission; see `05-risk-manager.md` §3). Blocks 5 keys its open-order table by it,
+  so the engine MUST echo `request_id` on every outbound `Fill` and `OrderState` for
+  that request, and MUST treat a duplicate `request_id` as a retransmission (ignore,
+  re-publish current `OrderState`) rather than a new order. Block 5 may also send
+  `CancelOrderRequest{request_id}`: the engine cancels every non-terminal child order
+  of that request (normal PENDING_CANCEL flow, §2.2).
+- **`reduce_only: bool`** — from `OrderRequest`. When true, before submission and on
+  every resubmission the engine caps the remaining order qty at the absolute value of
+  its shadow position for the instrument (post-§5 reconciliation value); if the cap is
+  ≤ 0 the remainder is voided with `OrderState{CANCELLED, reason="REDUCE_ONLY_CAP"}`.
+  Pass-through to venue-native reduce-only flags when the adapter supports them.
 - **`client_order_id: str`** — engine-generated, deterministic, unique per child
   order attempt, ≤ 32 chars, charset `[A-Za-z0-9-]`. Scheme:
 
@@ -602,6 +614,19 @@ Blocks 5, 7 (it feeds the EOD flat verification), and 9 at the end of each round
 POSITION_DRIFT and FOREIGN_ORDER are WARN-level alerts; two consecutive rounds with
 the same POSITION_DRIFT is CRITICAL.
 
+In addition, at the end of **every** round (clean or not) the engine publishes one
+per-instrument `ReconciliationReport` for each instrument in the universe — this is
+the message Block 5's spec (§2, §8) consumes for its `RECON_MISMATCH` kill-switch
+trigger and must be emitted even when `broker_qty == 0`:
+
+```python
+@dataclass(frozen=True, slots=True)
+class ReconciliationReport:
+    ts: int             # ns, local time of the broker poll
+    instrument: str
+    broker_qty: float   # signed position per the broker
+```
+
 ---
 
 ## 6. Data structures (bus messages)
@@ -616,6 +641,7 @@ All dataclasses `@dataclass(frozen=True, slots=True)`. Fields required by
 class Fill:
     order_id: str          # == client_order_id
     intent_id: str
+    request_id: str        # echoed from OrderRequest (§2.1)
     instrument: str
     qty: int               # this fill's quantity, > 0
     price: float
@@ -643,6 +669,7 @@ class OrderState:
     state: OrderStatus
     reason: str | None     # reject/cancel/expiry code, else None
     intent_id: str
+    request_id: str        # echoed from OrderRequest (§2.1)
     instrument: str
     side: Literal["BUY", "SELL"]
     qty: int               # order quantity
