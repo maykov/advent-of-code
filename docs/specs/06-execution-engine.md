@@ -877,10 +877,10 @@ Config: T=2000, `reprice_min_interval_ms=150`, `passive_cap_bps=5`,
 - t=900: FILL 200 @ 100.01 on B → PARTIALLY_FILLED.
 - t=2000: deadline (anchored at t=0). Cancel B; t=2020 CANCELLED (filled 200).
 - t=2025: escalation. Current book ask 100.02×250, 100.03×600. Cap price =
-  floor(100.01 × 1.0008) = floor(100.090008) → 100.09; but assert engine sends
-  child C (`...-01-00`) LIMIT IOC 300 @ **100.09**? No — assert price is
-  `min(cap, ...)` = 100.09 with no request bound, and best_ask 100.02 ≤ 100.09 so
-  it sends; events FILL 250 @ 100.02, FILL 50 @ 100.03 → FILLED.
+  floor(100.01 × 1.0008) = floor(100.090008) → **100.09** (anchored to arrival
+  mid 100.01, no request bound). best_ask 100.02 ≤ 100.09, so the engine submits
+  child C (`...-01-00`) LIMIT IOC 300 @ 100.09; scripted events FILL 250 @ 100.02,
+  FILL 50 @ 100.03 → FILLED.
 - Assert totals: filled 500, avg = (200×100.01 + 250×100.02 + 50×100.03)/500
   = **100.017**; slippage_bps = (100.017−100.01)/100.01×1e4 = **+0.69993**
   (assert ≈0.70); `n_child_orders=3`; quality emitted once at t of last fill.
